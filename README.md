@@ -70,12 +70,13 @@ Make sure src/lib.rs exists and exposes your modules:
 ```bash
 pub mod file_ops;
 pub mod organizer;
-Tests live in tests/organizer_tests.rs.
 ```
+Tests live in tests/organizer_tests.rs.
+
 
 🔧 File Type Categories
 Supports:
-
+```
 🖼️ Images: jpg, png, heic, webp, tiff, etc.
 
 📄 Documents: pdf, docx, txt, md, etc.
@@ -91,24 +92,7 @@ Supports:
 💾 Apps: .app bundles (macOS only)
 
 ...and more!
-
-🧠 Architecture
-main.rs: CLI entry point
-
-organizer.rs: core logic for sorting/moving files
-
-file_ops.rs: utilities (file hashing, name conflict resolution)
-
-watcher.rs: optional folder-watching logic (uses notify)
-
-tests/: unit + integration tests
-
-📦 Future Plans
- Tauri GUI frontend
-
- JSON-based config for custom rules
-
- LaunchAgent autostart for background use on macOS
+```
 
 🤝 Contributing
 Feel free to fork, improve, or submit PRs!
