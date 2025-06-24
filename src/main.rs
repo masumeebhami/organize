@@ -8,8 +8,12 @@ mod organizer;
 mod watcher;
 
 #[derive(Parser)]
-#[command(name = "organize")]
-#[command(about = "Smart file organizer for macOS", long_about = None)]
+#[command(
+    name = "organize",
+    version,
+    about = "Smart file organizer for macOS",
+    long_about = None
+)]
 struct Args {
     /// Directory to watch
     #[arg(short, long, default_value = "~/Downloads")]

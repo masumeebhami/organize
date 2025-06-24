@@ -1,4 +1,7 @@
-use crate::file_ops::{file_hash, find_nonconflicting_path};
+use crate::file_ops::{
+    extract_year_month, file_hash, find_nonconflicting_path, print_error, print_move,
+};
+use console::style;
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -112,6 +115,10 @@ pub fn category_map() -> HashMap<&'static str, &'static str> {
 }
 
 pub fn organize_folder(path: &PathBuf, dry_run: bool) {
+    let mut moved = 0;
+    let mut failed = 0;
+    let mut skipped = 0;
+
     let categories = category_map();
 
     for entry in WalkDir::new(path).min_depth(1).max_depth(1) {
@@ -140,7 +147,10 @@ pub fn organize_folder(path: &PathBuf, dry_run: bool) {
 
             if let Some(name) = file_path.file_name() {
                 let target_path = find_nonconflicting_path(&target_dir, name);
-                log_move(file_path, &target_path, dry_run);
+                match log_move(file_path, &target_path, dry_run) {
+                    Ok(_) => moved += 1,
+                    Err(_) => failed += 1,
+                }
             }
             continue;
         }
@@ -151,7 +161,14 @@ pub fn organize_folder(path: &PathBuf, dry_run: bool) {
 
         if let Some(ext) = file_path.extension().and_then(|e| e.to_str()) {
             if let Some(subfolder) = categories.get(ext.to_lowercase().as_str()) {
-                let target_dir = path.join(subfolder);
+                let target_dir = if let Some((year, month)) = extract_year_month(file_path) {
+                    path.join(subfolder)
+                        .join(year.to_string())
+                        .join(format!("{:02}", month))
+                } else {
+                    path.join(subfolder)
+                };
+
                 if let Err(e) = fs::create_dir_all(&target_dir) {
                     eprintln!("Failed to create target dir: {}", e);
                     continue;
@@ -166,25 +183,36 @@ pub fn organize_folder(path: &PathBuf, dry_run: bool) {
 
                         if src_hash.is_some() && dst_hash.is_some() && src_hash == dst_hash {
                             println!("Duplicate file skipped: {:?}", file_path);
+                            skipped += 1;
                             continue;
                         }
 
                         target_path = find_nonconflicting_path(&target_dir, name);
                     }
 
-                    log_move(file_path, &target_path, dry_run);
+                    match log_move(file_path, &target_path, dry_run) {
+                        Ok(_) => moved += 1,
+                        Err(_) => failed += 1,
+                    }
                 }
             }
         }
     }
+    println!("\n📦 {}", style("Summary").bold().underlined());
+    println!("{} Moved", style(format!("{:>4}", moved)).green());
+    println!("{} Skipped", style(format!("{:>4}", skipped)).yellow());
+    println!("{} Failed", style(format!("{:>4}", failed)).red());
 }
 
-fn log_move(from: &Path, to: &Path, dry_run: bool) {
+fn log_move(from: &Path, to: &Path, dry_run: bool) -> Result<(), ()> {
     if dry_run {
         println!("[DRY RUN] Would move {:?} -> {:?}", from, to);
-    } else if let Err(e) = fs::rename(from, to) {
-        eprintln!("Failed to move {:?} → {:?}: {}", from, to, e);
+        Ok(())
+    } else if let Err(_e) = fs::rename(from, to) {
+        print_error("Failed to move {to}", from);
+        Err(())
     } else {
-        println!("Moved {:?} → {:?}", from, to);
+        print_move(from, to, dry_run);
+        Ok(())
     }
 }
