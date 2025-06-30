@@ -97,3 +97,4 @@ Supports:
 🤝 Contributing
 Feel free to fork, improve, or submit PRs!
 Bug reports and feedback welcome via GitHub Issues.
+We will update it to ensure full compatibility with Intel-based Macs.
