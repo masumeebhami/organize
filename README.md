@@ -98,3 +98,31 @@ Supports:
 Feel free to fork, improve, or submit PRs!
 Bug reports and feedback welcome via GitHub Issues.
 We will update it to ensure full compatibility with Intel-based Macs.
+
+
+🚀 Installation via Homebrew
+You can easily install organize using Homebrew:
+
+```
+brew update
+brew tap masumeebhami/organize
+brew install organize
+```
+🛠 Usage
+View all available commands and options:
+
+```
+organize --help
+```
+
+
+Preview changes (see what will happen, without making changes):
+```
+organize --dir ~/Desktop --once --dry-run
+```
+
+Organize your files in a folder (this will apply the changes):
+
+```
+organize --dir ~/Desktop --once
+```
