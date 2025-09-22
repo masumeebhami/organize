@@ -161,12 +161,11 @@ pub fn organize_folder(path: &PathBuf, dry_run: bool) {
 
         if let Some(ext) = file_path.extension().and_then(|e| e.to_str()) {
             if let Some(subfolder) = categories.get(ext.to_lowercase().as_str()) {
-                let target_dir = if let Some((year, month)) = extract_year_month(file_path) {
-                    path.join(subfolder)
+                let target_dir = match extract_year_month(file_path) {
+                    Ok((year, month)) => path.join(subfolder)
                         .join(year.to_string())
-                        .join(format!("{:02}", month))
-                } else {
-                    path.join(subfolder)
+                        .join(format!("{:02}", month)),
+                    Err(_) => path.join(subfolder),
                 };
 
                 if let Err(e) = fs::create_dir_all(&target_dir) {
@@ -181,10 +180,13 @@ pub fn organize_folder(path: &PathBuf, dry_run: bool) {
                         let src_hash = file_hash(file_path);
                         let dst_hash = file_hash(&target_path);
 
-                        if src_hash.is_some() && dst_hash.is_some() && src_hash == dst_hash {
-                            println!("Duplicate file skipped: {:?}", file_path);
-                            skipped += 1;
-                            continue;
+                        match (src_hash, dst_hash) {
+                            (Ok(source), Ok(destination)) if source == destination => {
+                                println!("Duplicate file skipped: {:?}", file_path);
+                                skipped += 1;
+                                continue;
+                            }
+                            _ => {}
                         }
 
                         target_path = find_nonconflicting_path(&target_dir, name);
@@ -208,11 +210,19 @@ fn log_move(from: &Path, to: &Path, dry_run: bool) -> Result<(), ()> {
     if dry_run {
         println!("[DRY RUN] Would move {:?} -> {:?}", from, to);
         Ok(())
-    } else if let Err(_e) = fs::rename(from, to) {
-        print_error("Failed to move {to}", from);
-        Err(())
     } else {
-        print_move(from, to, dry_run);
-        Ok(())
+        match fs::rename(from, to) {
+            Ok(_) => {
+                print_move(from, to, dry_run);
+                Ok(())
+            }
+            Err(e) => {
+                // high-level msg with interpolated `to`
+                let msg = format!("Failed to move to {:?}", to);
+                // pass the source error as Some(&e)
+                print_error(&msg, from, Some(&e));
+                Err(())
+            }
+        }
     }
 }

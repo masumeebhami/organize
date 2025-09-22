@@ -18,3 +18,12 @@ dry-run dir:
 # Default: list all recipes
 default:
     @just --list
+
+format:
+    cargo fmt
+
+clippy:
+    cargo clippy
+
+check:
+    cargo check

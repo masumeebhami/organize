@@ -1,78 +1,97 @@
 use chrono::{DateTime, Datelike, Utc};
 use console::{Emoji, style};
 use sha2::{Digest, Sha256};
-use std::fs;
-use std::fs::File;
-use std::io::Read;
+use std::ffi::{OsStr, OsString};
+use std::fs::{self, File, Metadata};
+use std::io::{self, Read};
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
-pub fn file_hash(path: &Path) -> Option<String> {
-    let mut file = File::open(path).ok()?;
-    let mut hasher = Sha256::new();
-    let mut buffer = [0u8; 1024];
-
-    while let Ok(n) = file.read(&mut buffer) {
-        if n == 0 {
-            break;
-        }
-        hasher.update(&buffer[..n]);
-    }
-
-    Some(format!("{:x}", hasher.finalize()))
-}
-
-pub fn find_nonconflicting_path(dir: &Path, file_name: &std::ffi::OsStr) -> PathBuf {
-    let original = file_name.to_string_lossy().to_string();
-    let mut path = dir.join(&original);
-
-    if !path.exists() {
-        return path;
-    }
-
-    let (base, ext) = match original.rsplit_once('.') {
-        Some((b, e)) => (b.to_string(), format!(".{}", e)),
-        None => (original.clone(), String::new()),
-    };
-
-    for i in 1..1000 {
-        let candidate = format!("{} ({}){}", base, i, ext);
-        path = dir.join(candidate);
-        if !path.exists() {
-            break;
-        }
-    }
-
-    path
-}
-static FILE: Emoji<'_, '_> = Emoji("📄 ", "");
+static FILE_: Emoji<'_, '_> = Emoji("📄 ", "");
 static CHECK: Emoji<'_, '_> = Emoji("✅", "✔");
 static SKIP: Emoji<'_, '_> = Emoji("⏩", ">>");
 static ERROR: Emoji<'_, '_> = Emoji("❌", "X");
 
+/// Compute a SHA-256 hash of a file at `path`.
+/// Returns an io::Result so callers can surface real errors instead of a silent None.
+pub fn file_hash(path: &Path) -> io::Result<String> {
+    let mut file = File::open(path)?;
+    let mut hasher = Sha256::new();
+
+    // Larger buffer for fewer syscalls; BufReader isn’t necessary when we already
+    // manage the read loop with our own buffer.
+    let mut buf = [0u8; 64 * 1024];
+    loop {
+        let n = file.read(&mut buf)?;
+        if n == 0 {
+            break;
+        }
+        hasher.update(&buf[..n]);
+    }
+
+    Ok(format!("{:x}", hasher.finalize()))
+}
+
+/// Given a directory and a desired filename (OsStr), find a non-conflicting path by
+/// appending " (n)" before the extension, e.g. "name (1).ext".
+/// Avoids lossy UTF-8 conversions and respects platform path semantics.
+pub fn find_nonconflicting_path(dir: &Path, file_name: &OsStr) -> PathBuf {
+    let mut candidate = dir.join(file_name);
+    if !candidate.exists() {
+        return candidate;
+    }
+
+    // Split stem & extension safely (no UTF-8 assumptions)
+    let stem = Path::new(file_name)
+        .file_stem()
+        .map(OsStr::to_os_string)
+        .unwrap_or_else(|| OsString::from(file_name));
+    let ext = Path::new(file_name).extension().map(OsStr::to_os_string);
+
+    // Build "{stem} (n){.ext?}"
+    let mut i: u32 = 1;
+    loop {
+        let mut next = OsString::new();
+        next.push(&stem);
+        next.push(format!(" ({})", i));
+        if let Some(ref e) = ext {
+            next.push(".");
+            next.push(e);
+        }
+
+        candidate = dir.join(&next);
+        if !candidate.exists() {
+            return candidate;
+        }
+        i = i.saturating_add(1); // avoid overflow panic (practically unreachable)
+    }
+}
+
 pub fn print_move(from: &Path, to: &Path, dry_run: bool) {
+    let arrow = "→";
     if dry_run {
         println!(
             "{} {} {} {}",
             style(SKIP).yellow(),
-            FILE,
+            FILE_,
             style(from.display()).dim(),
-            style("→").dim().bold(),
+            style(arrow).dim().bold(),
         );
         println!("   {}", style(to.display()).dim().italic());
     } else {
         println!(
             "{} {} {} {} {}",
             style(CHECK).green(),
-            FILE,
+            FILE_,
             style(from.display()).green().bold(),
-            style("→").green().bold(),
+            style(arrow).green().bold(),
             style(to.display()).green()
         );
     }
 }
 
-pub fn print_error(msg: &str, path: &Path) {
+/// Print a formatted error with context and (optionally) a source error.
+pub fn print_error(msg: &str, path: &Path, source: Option<&dyn std::error::Error>) {
     eprintln!(
         "{} {} {}",
         style(ERROR).red(),
@@ -80,10 +99,25 @@ pub fn print_error(msg: &str, path: &Path) {
         style(path.display()).red()
     );
     eprintln!("    {}", style(msg).red().italic());
+    if let Some(err) = source {
+        eprintln!("    {}", style(format!("caused by: {}", err)).red().dim());
+    }
 }
-pub fn extract_year_month(path: &Path) -> Option<(i32, u32)> {
-    let metadata = fs::metadata(path).ok()?;
-    let modified: SystemTime = metadata.modified().ok()?;
-    let datetime: DateTime<Utc> = modified.into(); // Clear and explicit
-    Some((datetime.year(), datetime.month()))
+
+/// Extract (year, month) from a file's timestamp, preferring `created()`
+/// and falling back to `modified()` when `created()` is unsupported.
+pub fn extract_year_month(path: &Path) -> io::Result<(i32, u32)> {
+    let meta = fs::metadata(path)?;
+    let t = preferred_file_time(&meta)?;
+    let dt: DateTime<Utc> = t.into();
+    Ok((dt.year(), dt.month()))
+}
+
+/// Pick the most stable timestamp available for dating files.
+/// On many Unix FSes, `created()` may be unsupported—handle that gracefully.
+fn preferred_file_time(meta: &Metadata) -> io::Result<SystemTime> {
+    match meta.created() {
+        Ok(c) => Ok(c),
+        Err(_) => meta.modified(),
+    }
 }
